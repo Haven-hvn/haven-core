@@ -1,0 +1,42 @@
+<!-- P Project Configuration for the Sovereign Agent -->
+<Project>
+  <InputFiles>
+    <!-- Core: Type definitions -->
+    <PFile>spec/core/Types.p</PFile>
+
+    <!-- Core: Event declarations -->
+    <PFile>spec/core/Events.p</PFile>
+
+    <!-- Core: Shared functions -->
+    <PFile>spec/core/Interfaces.p</PFile>
+
+    <!-- Core: Kernel machines (5) -->
+    <PFile>spec/core/machines/WalletIdentity.p</PFile>
+    <PFile>spec/core/machines/Treasury.p</PFile>
+    <PFile>spec/core/machines/MessageBus.p</PFile>
+    <PFile>spec/core/machines/ToolExecutor.p</PFile>
+    <PFile>spec/core/machines/AgentLoop.p</PFile>
+
+    <!-- Core: Entry point -->
+    <PFile>spec/core/Main.p</PFile>
+
+    <!-- Extension: Types and events -->
+    <PFile>spec/extensions/Types.p</PFile>
+    <PFile>spec/extensions/Events.p</PFile>
+
+    <!-- Extension: Reference machines (7) -->
+    <PFile>spec/extensions/machines/ChatChannel.p</PFile>
+    <PFile>spec/extensions/machines/ProviderManager.p</PFile>
+    <PFile>spec/extensions/machines/SessionManager.p</PFile>
+    <PFile>spec/extensions/machines/CronService.p</PFile>
+    <PFile>spec/extensions/machines/HeartbeatService.p</PFile>
+    <PFile>spec/extensions/machines/SubagentManager.p</PFile>
+    <PFile>spec/extensions/machines/InfrastructureManager.p</PFile>
+
+    <!-- Safety / Liveness Specifications -->
+    <PFile>spec/safety/Specifications.p</PFile>
+  </InputFiles>
+  <OutputDir>./output</OutputDir>
+  <Target>CSharp</Target>
+  <ProjectName>SovereignAgent</ProjectName>
+</Project>
