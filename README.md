@@ -53,7 +53,7 @@ At the core is a **kernel** — five state machines that handle the fundamentals
 
 The kernel is chain-agnostic, provider-agnostic, and channel-agnostic. It doesn't know if it's on Ethereum or Solana. It doesn't know if it's talking via XMTP or Telegram. It doesn't know if its intelligence comes from a local model or a decentralized inference network. It just defines the contracts. Adapters fill in the specifics.
 
-**Adapters** (see [haven-adapters](https://github.com/user/haven-adapters)) are the ecosystem. An Ethereum adapter gives the agent an Ethereum identity. An XMTP adapter gives it encrypted messaging. A Gonka adapter gives it paid, wallet-signed inference. A Solana adapter gives it a second chain. Each adapter is independently developed, independently versioned, and independently discoverable — eventually through an on-chain registry where agents find and install capabilities themselves.
+**Adapters** (see [Haven Adapters](https://github.com/Haven-hvn/haven-adapters) are the ecosystem. An Ethereum adapter gives the agent an Ethereum identity. An XMTP adapter gives it encrypted messaging. A Gonka adapter gives it paid, wallet-signed inference. A Solana adapter gives it a second chain. Each adapter is independently developed, independently versioned, and independently discoverable — eventually through an on-chain registry where agents find and install capabilities themselves.
 
 **Applications** are what agents do. A shoutbox bot. A trading agent. A DAO participant. A content creator. Each application is thin — it just wires a kernel to the adapters it needs and adds its own domain logic. The kernel and adapters are shared infrastructure. The application is the personality.
 
@@ -134,8 +134,8 @@ The agent doesn't work for you. It doesn't work for a corporation. It works for 
 
 ## Related Repos
 
-- **[haven-adapters](../haven-adapters)** — Chain & provider adapters (Ethereum, XMTP, LM Studio)
-- **[web3-shoutbox-platform](../../)** — Shoutbox web app + sovereign bot (first application)
+- [**Haven Adapters**](https://github.com/Haven-hvn/haven-adapters) — Chain & provider adapters (Ethereum, XMTP, LM Studio)
+- **[web3-shoutbox-platform](https://github.com/HavenCTO/web3-shoutbox-platform)** — Shoutbox web app + sovereign bot (first application)
 
 ---
 
