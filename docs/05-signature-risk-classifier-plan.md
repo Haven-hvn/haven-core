@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document specifies the implementation of a binary classifier - `SignatureRiskClassifier` - embedded at SALM Layer 3 (Economic/Treasury) as a signing gate. The classifier intercepts every `eSignRequest` event before it reaches Layer 2 (WalletIdentity) and produces a binary decision: `safe (0)` or `malicious (1)`.
+This document specifies the implementation of a binary classifier - `SignatureRiskClassifier` - embedded at SALM Layer 3 (Economic/Treasury) as a signing risk gate. The classifier runs during cost authorization and maps risk labels (`safe (0)`, `malicious (1)`) into the core event contract: `eCostAuthorized(approved: bool, reason: string)`.
 
 The chosen architecture is a **hybrid LightGBM classifier** that fuses two input streams:
 1. **Structured tabular features** extracted from the transaction payload (contract address, function selector, recipient, value, token type, EIP-712 fields)
@@ -45,7 +45,7 @@ This approach is grounded in PTXPhish's feature engineering for payload-based ph
 │              ┌─────────────┴────────────────┐                      │
 │           safe (0)                    malicious (1)                │
 │        eCostAuthorized             eCostAuthorized                 │
-│        (approved=true)             (approved=false)                │
+│  (approved=true, reason=...)   (approved=false, reason="risk")    │
 │        + budget check              + eSignBlocked event            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -56,7 +56,7 @@ This approach is grounded in PTXPhish's feature engineering for payload-based ph
 
 ### 3.1 Structured Payload Features (~25 features)
 
-These are extracted deterministically from the `eSignRequest` payload using ABI decoding (via `viem` or `ethers.js` inside the Layer 3 Treasury module - note: Layer 3 may call a balance-query style Layer 2 extension for on-chain lookups; it does not import `viem` for signing, only for ABI decoding which is pure computation).
+These are extracted deterministically from signing context (payload + decoded calldata) by adapter/extension implementations (for example in `haven-adapters`) and passed into Layer 3 as normalized fields. Per SALM, signing operations remain in Layer 2 (`WalletIdentity`) and Treasury remains the Layer 3 authorization gate.
 
 **Function Selector Features**
 
@@ -195,7 +195,10 @@ Once deployed, every `eSignRequest` event - whether blocked or approved - is log
 ## SALM Integration: Event Flow
 
 ```typescript
-// Layer 3: Treasury - eCostAuthorize handler (TypeScript pseudocode)
+// Layer 3: Treasury risk gate (TypeScript pseudocode)
+// Note: This is an implementation-level extension around core events.
+// Core spec keeps eCostAuthorize(requestId, estimate, requestor) unchanged.
+// Signing context can be carried in extension metadata.
 
 import { SignatureRiskClassifier } from './SignatureRiskClassifier';
 import { FeatureExtractor } from './FeatureExtractor';
@@ -205,35 +208,44 @@ const extractor = new FeatureExtractor();
 
 machine.on('eCostAuthorize', async (event: CostAuthorizeEvent) => {
   // 1. Existing budget check
-  const budgetOk = treasury.canAfford(event.estimatedGas);
+  const budgetOk = treasury.canAfford(event.estimate);
 
-  // 2. Extract features from sign request payload
-  const structuredFeatures = extractor.fromPayload(event.signRequest);
-  const messageEmbedding = await embedder.encode(event.inboundMessage?.content ?? '');
+  // 2. Extract features from extension-provided signing context
+  const signingContext = event.metadata?.signingContext;
+  const structuredFeatures = extractor.fromPayload(signingContext?.payload);
+  const messageEmbedding = await embedder.encode(signingContext?.inboundMessage?.content ?? '');
   const featureVector = [...structuredFeatures, ...messageEmbedding]; // ~409 dims
 
   // 3. Run binary classifier
   const { label, confidence, shapValues } = classifier.predict(featureVector);
-  const riskOk = label === 0; // 0 = safe
+  const riskOk = label === 0; // 0=safe, 1=malicious
 
   // 4. Emit result
   if (budgetOk && riskOk) {
-    machine.emit('eCostAuthorized', { approved: true, requestId: event.requestId });
+    machine.emit('eCostAuthorized', {
+      requestId: event.requestId,
+      approved: true,
+      reason: 'Authorized'
+    });
   } else {
-    machine.emit('eCostAuthorized', { approved: false, requestId: event.requestId });
+    machine.emit('eCostAuthorized', {
+      requestId: event.requestId,
+      approved: false,
+      reason: budgetOk ? 'risk' : 'budget'
+    });
     if (!riskOk) {
       machine.emit('eSignBlocked', {
         requestId: event.requestId,
         confidence,
         topFeatures: shapValues.top(5),      // SHAP top-5 for observability
-        inboundMessageSnippet: event.inboundMessage?.content?.slice(0, 100)
+        inboundMessageSnippet: signingContext?.inboundMessage?.content?.slice(0, 100)
       });
     }
   }
 });
 ```
 
-The `eSignBlocked` event is a new first-class Layer 3 event. Layer 6 (AgentLoop) subscribes to it to inform its response to the user. Layer 7 (Autonomy) can use accumulated `eSignBlocked` counts to trigger a `Locked` survival state under sustained attack.
+`eSignBlocked` in this plan is proposed as an extension event (not currently in core `spec/core/Events.p`). Layer 6 (`AgentLoop`) may subscribe to it for user-facing explanations, while Layer 7 autonomy policies can consume aggregated block metrics for survival strategy adjustments.
 
 ---
 
@@ -242,7 +254,7 @@ The `eSignBlocked` event is a new first-class Layer 3 event. Layer 6 (AgentLoop)
 ### Phase 1 - Offline Bootstrap (Week 1-2)
 
 - Download and parse PTXPhish dataset[2]
-- Build `FeatureExtractor` in TypeScript: ABI decoder for known function selectors, address registry lookup (Uniswap, Aave, 1inch, known phishing address lists), EIP-712 domain parser[8]
+- Build `FeatureExtractor` in TypeScript as an extension/adapter component (not core kernel): ABI decoder for known function selectors, address registry lookup (Uniswap, Aave, 1inch, known phishing address lists), EIP-712 domain parser[8]
 - Generate synthetic `InboundMessage` text for PTXPhish samples (prompt templates per attack category)
 - Train initial LightGBM model in Python (sklearn API), export to ONNX/WASM for Node.js deployment
 - Evaluate: target precision > 0.95, recall > 0.85 on held-out 20% split (asymmetric threshold: prefer false positives over false negatives given irreversible on-chain consequences)
@@ -251,7 +263,7 @@ The `eSignBlocked` event is a new first-class Layer 3 event. Layer 6 (AgentLoop)
 
 - Integrate `Xenova/all-MiniLM-L6-v2` (ONNX runtime, no external API call, TEE-compatible) as the embedding module[10][11]
 - Wire `SignatureRiskClassifier` into the Treasury `eCostAuthorize` handler
-- Add `eSignBlocked` event definition to SALM event schema
+- Add `eSignBlocked` as an extension event (for example in `spec/extensions/Events.p`) while keeping core event contracts stable
 - Unit tests: inject known-malicious payloads (max-uint256 approve to unknown spender + urgency prompt), verify blocking; inject known-benign payloads, verify pass-through
 
 ### Phase 3 - Live Logging and Retraining (Week 4+)
@@ -278,6 +290,6 @@ Research on adversarial attacks against Ethereum phishing classifiers shows that
 | Event | Layer | Trigger | Payload |
 |---|---|---|---|
 | `eSignBlocked` | 3 | Classifier returns `malicious` | `requestId`, `confidence`, `topFeatures` (SHAP), `snippet` |
-| `eCostAuthorized(approved=false)` | 3 | Budget OR risk check fails | `requestId`, `reason: 'risk'` |
-| `eTreasuryStateChanged` | 3 | Repeated `eSignBlocked` events | `newState: 'Locked'` |
-| `eSignRequest` (passed through) | 2 | Only after `eCostAuthorized(approved=true)` | Original payload unchanged |
+| `eCostAuthorized(approved=false)` | 3 | Budget or risk check fails | `requestId`, `approved=false`, `reason` (`risk` or budget-related) |
+| `eTreasuryStateChanged` | 3 | Runway thresholds crossed (`FUNDED/LOW/CRITICAL/DEPLETED`) | `previous`, `current` |
+| `eSignRequest` | 2 | Emitted by requesting workflows after `eCostAuthorized(approved=true)` | `SigningRequest` payload |
