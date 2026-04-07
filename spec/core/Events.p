@@ -62,7 +62,7 @@ event eToolResult: ToolResult;
 event eLLMRequest: (
     sessionKey: SessionKey,
     messages: seq[map[string, string]],
-    tools: seq[map[string, string]],
+    tools: seq[ToolDefinition],
     requestor: machine,
     estimatedCost: CostEstimate
 );
