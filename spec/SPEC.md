@@ -111,6 +111,7 @@ For developers building on this spec, the `docs/` directory provides mental mode
 | **[01-extension-guide.md](docs/01-extension-guide.md)** | How to build channels, tools, providers, storage backends, and other extensions |
 | **[02-data-flow.md](docs/02-data-flow.md)** | Detailed traces of how data flows through the layers for 5 key scenarios |
 | **[03-implementation-roadmap.md](docs/03-implementation-roadmap.md)** | Phased build plan from spec to running sovereign agent (7 phases, ~8-13 weeks) |
+| **[06-tee-self-attesting-lineage-plan.md](docs/06-tee-self-attesting-lineage-plan.md)** | Extension-first plan for parent-child trust bootstrapping using TEE attestation, measurement pinning, and key binding |
 
 ## Running
 
