@@ -70,6 +70,8 @@ fun IsBudgetAvailable(budget: BudgetAllocation, category: BudgetCategory, spentP
         limit = budget.tools;
     } else if (category == INFRASTRUCTURE) {
         limit = budget.infrastructure;
+    } else if (category == STORAGE) {
+        limit = budget.storage;
     } else if (category == MESSAGING) {
         limit = budget.messaging;
     } else {
@@ -79,13 +81,23 @@ fun IsBudgetAvailable(budget: BudgetAllocation, category: BudgetCategory, spentP
     return spentPercentage < limit;
 }
 
-// Default budget allocation — balanced, with a 5% emergency reserve.
+// Default budget allocation — balanced, with storage and emergency reserves.
+// Percentages: inference=38, tools=14, infrastructure=28, storage=5,
+//              messaging=10, reserve=5. Total = 100.
 fun DefaultBudgetAllocation(): BudgetAllocation {
     return (
-        inference = 40,
-        tools = 15,
-        infrastructure = 30,
+        inference = 38,
+        tools = 14,
+        infrastructure = 28,
+        storage = 5,
         messaging = 10,
         reserve = 5
     );
+}
+
+// Deterministically derive the agent's dPID namespace from its Ethereum address.
+// Pure function — actual registry lookup is an extension concern.
+// In practice: hash(address) → dPID namespace, or follow dpid.org conventions.
+fun DeriveDPID(address: Address): DPID {
+    return format("dpid:{0}", address);
 }

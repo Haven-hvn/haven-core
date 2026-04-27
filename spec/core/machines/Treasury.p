@@ -167,13 +167,21 @@ machine Treasury {
         }
 
         on eCostAuthorize do (req: (requestId: string, estimate: CostEstimate, requestor: machine)) {
-            // In critical mode, only infrastructure and minimal inference allowed.
+            // In critical mode, only infrastructure, storage, and minimal inference allowed.
             if (req.estimate.category == INFRASTRUCTURE) {
                 // Infrastructure is life-or-death — always approve.
                 send req.requestor, eCostAuthorized, (
                     requestId = req.requestId,
                     approved = true,
                     reason = "Infrastructure authorized (survival)"
+                );
+            } else if (req.estimate.category == STORAGE) {
+                // Storage is survival-critical — without memory persistence,
+                // the agent loses continuity on restart. Approve like infrastructure.
+                send req.requestor, eCostAuthorized, (
+                    requestId = req.requestId,
+                    approved = true,
+                    reason = "Storage authorized (survival — memory persistence)"
                 );
             } else if (req.estimate.category == INFERENCE) {
                 // Allow inference only if very cheap.

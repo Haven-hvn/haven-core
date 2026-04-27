@@ -124,6 +124,71 @@ event eTreasuryReportRequest;
 event eTreasuryReport: TreasuryReport;
 
 // ============================================================================
+// MIDDLEWARE PIPELINE EVENTS — Generic inference interception
+// ============================================================================
+// These events define the abstract middleware pipeline. The core knows that
+// inference can flow through middleware, but knows nothing about what any
+// specific middleware does. Mirrors lmstudio-bridge's MiddlewareRunner pattern.
+
+// Register a middleware with the inference pipeline.
+// priority determines execution order (lower = earlier in request chain,
+// later in response chain). Mirrors MiddlewareRunner.use().
+event eRegisterMiddleware: (name: MiddlewareName, handler: machine, priority: int);
+
+// Remove a middleware from the pipeline.
+event eUnregisterMiddleware: MiddlewareName;
+
+// Dispatched to each middleware's onRequest handler in priority order.
+// Middleware can mutate the context metadata map.
+event eMiddlewareRequest: (context: PipelineContext, request: (
+    sessionKey: SessionKey,
+    messages: seq[map[string, string]],
+    tools: seq[ToolDefinition],
+    requestor: machine,
+    estimatedCost: CostEstimate
+));
+
+// Dispatched to each middleware's onResponse handler in reverse priority order.
+// Middleware can mutate the context metadata map.
+event eMiddlewareResponse: (context: PipelineContext, response: (
+    sessionKey: SessionKey,
+    response: LLMResponse
+));
+
+// Middleware signals it's done — advance to the next middleware in the chain.
+// Equivalent to calling next() in lmstudio-bridge.
+event eMiddlewareNext: PipelineContext;
+
+// A middleware failed. The pipeline decides whether to continue or abort.
+event eMiddlewareError: (middleware: MiddlewareName, error: string, context: PipelineContext);
+
+// ============================================================================
+// dPID / MEMORY EVENTS — Identity-bound persistent memory
+// ============================================================================
+// These events support the identity-bound persistence layer. They are consumed
+// by extensions (dPID resolver, persistence middleware), with WalletIdentity
+// participating for dPID awareness and signing.
+
+// Resolve the agent's dPID to get the current root CID on boot.
+event eResolveDPID: DPID;
+
+// Response carrying the current CID and version.
+event eDPIDResolved: DPIDVersion;
+
+// Request to update the agent's dPID to a new root CID.
+// Requires WalletIdentity signature.
+event eUpdateDPID: (newCid: CID, requestor: machine);
+
+// Confirmation that the dPID was updated.
+event eDPIDUpdated: DPIDVersion;
+
+// Request to restore agent state from a specific CID. Used during boot.
+event eMemoryRestore: CID;
+
+// Confirmation that memory was restored.
+event eMemoryRestored: (success: bool, sessionCount: int);
+
+// ============================================================================
 // EXTENSION REGISTRATION EVENTS — Plugin system
 // ============================================================================
 

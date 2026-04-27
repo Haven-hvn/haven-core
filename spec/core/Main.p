@@ -4,6 +4,11 @@
  * Creates and wires the 5 core kernel machines. Extensions are registered
  * after kernel boot via events (eRegisterChannel, eRegisterProvider, etc.).
  *
+ * The optional InferencePipeline extension can be wired between AgentLoop
+ * and the LLM provider to enable middleware processing (logging, compression,
+ * encryption, persistence). If not wired, AgentLoop talks directly to the
+ * provider (backward compatible).
+ *
  * Design principle: Main only knows about core machines. It does NOT
  * instantiate extensions — those are plugged in by the host environment.
  * A minimal deployment needs only these 5 machines plus at least one
@@ -19,6 +24,11 @@ machine SovereignAgentKernel {
 
     // Extension-provided machines (set after boot via registration events).
     var provider: machine;
+
+    // Optional inference pipeline (extension-provided).
+    // When present, sits between AgentLoop and provider for middleware processing.
+    var pipeline: machine;
+    var hasPipeline: bool;
 
     start state Boot {
         entry {
@@ -42,7 +52,12 @@ machine SovereignAgentKernel {
             //    For model checking, we use a ProviderStub.
             provider = new ProviderStub();
 
-            // 5. AgentLoop — the reasoning engine, wired to everything.
+            // 5. Pipeline is NOT created here — it's an optional extension.
+            //    To enable the pipeline, the host environment creates an
+            //    InferencePipeline and registers it before sending eStart.
+            hasPipeline = false;
+
+            // 6. AgentLoop — the reasoning engine, wired to everything.
             agent = new AgentLoop(
                 bus = this,       // Placeholder — bus not created yet
                 provider = provider,
@@ -51,7 +66,7 @@ machine SovereignAgentKernel {
                 wallet = wallet
             );
 
-            // 6. MessageBus — routes messages between channels and agent.
+            // 7. MessageBus — routes messages between channels and agent.
             bus = new MessageBus(agent = agent);
 
             // Re-wire: ToolExecutor needs a reference to the real agent.
@@ -71,6 +86,11 @@ machine SovereignAgentKernel {
             print "  4. Send eRegisterProvider (at least one LLM provider)";
             print "  5. Send eToolRegister to ToolExecutor (at least one tool)";
             print "  6. Send eStart to MessageBus and AgentLoop";
+            print "";
+            print "Optional: Wire an InferencePipeline for middleware support:";
+            print "  - Create InferencePipeline(agentLoop, provider)";
+            print "  - Register middleware via eRegisterMiddleware";
+            print "  - The pipeline is transparent — AgentLoop doesn't change";
 
             goto Running;
         }

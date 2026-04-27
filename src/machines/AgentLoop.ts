@@ -9,10 +9,16 @@
  * think→tool→think loop. Every LLM call and tool call is cost-gated
  * through Treasury.
  * 
+ * The optional InferencePipeline sits between AgentLoop and the provider.
+ * If registered, all eLLMRequest events route through it for middleware
+ * processing (logging, compression, encryption, persistence). If not
+ * registered, AgentLoop talks directly to the provider (backward compatible).
+ * 
  * Extension points (pi-mono patterns):
  *   - transformContext: Rewrite the message array before each LLM call
  *     (context window management, injection, pruning)
  *   - AbortController/signal: Cancel in-flight operations
+ *   - pipeline: Optional InferencePipeline for middleware interception
  * 
  * States: Init → Idle → CostChecking → Iterating → Responding → Idle
  */
@@ -56,12 +62,19 @@ export class AgentLoop extends Machine {
   private treasury: Machine;
   private wallet: Machine;
 
+  // Optional inference pipeline (extension-provided).
+  // If set, eLLMRequest routes through the pipeline instead of directly
+  // to the provider. The pipeline is a transparent proxy.
+  private pipeline: Machine | null = null;
+  private hasPipeline = false;
+
   // Configuration.
   private maxIterations = 40;
 
   // Runtime state.
   private running = false;
   private activeSessions = new Set<SessionKey>();
+  private memoryAvailable = false;
 
   // State for CostChecking
   private costCheckMessage: InboundMessage | null = null;
@@ -160,6 +173,22 @@ export class AgentLoop extends Machine {
       .on("eStopProcessing", (sessionKey: SessionKey) => {
         this.activeSessions.delete(sessionKey);
         this.log(`Stopped processing ${sessionKey}`);
+      })
+      // --- Pipeline registration (extension plug-in point) ---
+      .on("eRegisterMiddleware", (reg) => {
+        // Forward middleware registration to the pipeline if it exists.
+        if (this.hasPipeline && this.pipeline) {
+          this.sendTo(this.pipeline, "eRegisterMiddleware", reg);
+        }
+      })
+      // --- Memory restoration (boot-time) ---
+      .on("eMemoryRestored", (result: { success: boolean; sessionCount: number }) => {
+        this.memoryAvailable = result.success;
+        if (result.success) {
+          this.log(`Memory restored — ${result.sessionCount} sessions available`);
+        } else {
+          this.log("Memory restoration failed — continuing without history");
+        }
       })
       .on("eError", (err: string) => {
         this.log(`Error — ${err}`);
@@ -356,16 +385,25 @@ export class AgentLoop extends Machine {
       ? (this.toolExecutor as ToolExecutor).getToolDefinitions()
       : [];
 
-    this.sendTo(this.provider, "eLLMRequest", {
+    const llmReq = {
       sessionKey,
       messages: msgPayloads,
       tools: toolDefs,
       requestor: this.id,
       estimatedCost: {
-        amounts: [],
+        amounts: [] as { token: string; amount: number }[],
         category: BudgetCategory.INFERENCE,
       },
-    });
+    };
+
+    // Route through pipeline if registered, else direct to provider.
+    // This is the ONE line that changes the inference path — everything
+    // else in AgentLoop remains identical.
+    if (this.hasPipeline && this.pipeline) {
+      this.sendTo(this.pipeline, "eLLMRequest", llmReq);
+    } else {
+      this.sendTo(this.provider, "eLLMRequest", llmReq);
+    }
   }
 
   // ==========================================================================
@@ -377,6 +415,17 @@ export class AgentLoop extends Machine {
 
   /** Update the provider reference. */
   setProvider(provider: Machine): void { this.provider = provider; }
+
+  /**
+   * Set the inference pipeline (extension plug-in point).
+   * When set, eLLMRequest routes through the pipeline instead of
+   * directly to the provider. The pipeline is a transparent proxy.
+   */
+  setPipeline(pipeline: Machine): void {
+    this.pipeline = pipeline;
+    this.hasPipeline = true;
+    this.log("InferencePipeline wired — LLM requests will route through middleware");
+  }
 
   /**
    * Set a context transform function.

@@ -12,10 +12,15 @@
  * (SessionManager, CronService, HeartbeatService). The loop knows:
  *   1. Receive message
  *   2. Ask Treasury if we can afford inference
- *   3. Call LLM
+ *   3. Call LLM (through pipeline if registered, else direct to provider)
  *   4. If tool calls → execute via ToolExecutor (which cost-gates)
  *   5. Repeat until content response or budget exhausted
  *   6. Publish response
+ *
+ * The optional InferencePipeline sits between AgentLoop and the provider.
+ * If registered, all eLLMRequest events route through it for middleware
+ * processing (logging, compression, encryption, persistence). If not
+ * registered, AgentLoop talks directly to the provider (backward compatible).
  *
  * Session persistence, compaction, heartbeat tasks, and slash command
  * handling beyond /stop are all extension concerns. The core loop only
@@ -30,12 +35,20 @@ machine AgentLoop {
     var treasury: machine;
     var wallet: machine;
 
+    // Optional inference pipeline (extension-provided).
+    // If set, eLLMRequest routes through the pipeline instead of directly
+    // to the provider. The pipeline is a transparent proxy — from this
+    // machine's perspective, it still sends eLLMRequest and receives eLLMResponse.
+    var pipeline: machine;
+    var hasPipeline: bool;
+
     // Configuration.
     var maxIterations: int;
 
     // Runtime state.
     var running: bool;
     var activeSessions: set[SessionKey];
+    var memoryAvailable: bool;     // Whether persistent memory was restored on boot
 
     start state Init {
         entry (payload: (bus: machine, provider: machine, toolExecutor: machine,
@@ -45,6 +58,10 @@ machine AgentLoop {
             toolExecutor = payload.toolExecutor;
             treasury = payload.treasury;
             wallet = payload.wallet;
+
+            // Pipeline is optional — defaults to not set.
+            hasPipeline = false;
+            memoryAvailable = false;
 
             maxIterations = 40;
             running = false;
@@ -96,6 +113,28 @@ machine AgentLoop {
         on eStopProcessing do (sessionKey: SessionKey) {
             activeSessions -= (sessionKey);
             print format("AgentLoop: Stopped processing {0}", sessionKey);
+        }
+
+        // --- Pipeline registration (extension plug-in point) ---
+
+        on eRegisterMiddleware do (reg: (name: MiddlewareName, handler: machine, priority: int)) {
+            // If this is the first middleware registration and we have a pipeline,
+            // forward the registration to it. The pipeline machine handles ordering.
+            if (hasPipeline) {
+                send pipeline, eRegisterMiddleware, reg;
+            }
+        }
+
+        // --- Memory restoration (boot-time) ---
+
+        on eMemoryRestored do (result: (success: bool, sessionCount: int)) {
+            // Persistence extension restored agent memory from IPFS/dPID.
+            memoryAvailable = result.success;
+            if (result.success) {
+                print format("AgentLoop: Memory restored — {0} sessions available", result.sessionCount);
+            } else {
+                print "AgentLoop: Memory restoration failed — continuing without history";
+            }
         }
 
         on eError do (err: string) {
@@ -238,13 +277,25 @@ machine AgentLoop {
                 category = INFERENCE
             );
 
-            send provider, eLLMRequest, (
+            var llmReq: (sessionKey: SessionKey, messages: seq[map[string, string]],
+                         tools: seq[ToolDefinition], requestor: machine,
+                         estimatedCost: CostEstimate);
+            llmReq = (
                 sessionKey = currentMessage.sessionKey,
                 messages = default(seq[map[string, string]]),
-                tools = default(seq[map[string, string]]),
+                tools = default(seq[ToolDefinition]),
                 requestor = this,
                 estimatedCost = estimate
             );
+
+            // Route through pipeline if registered, else direct to provider.
+            // This is the ONE line that changes the inference path — everything
+            // else in AgentLoop remains identical.
+            if (hasPipeline) {
+                send pipeline, eLLMRequest, llmReq;
+            } else {
+                send provider, eLLMRequest, llmReq;
+            }
         }
     }
 

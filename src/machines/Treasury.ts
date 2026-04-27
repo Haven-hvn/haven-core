@@ -122,10 +122,18 @@ export class Treasury extends Machine {
       .on("eBalanceUpdate", (newBalances) => { this.updateBalances(newBalances); })
       .on("eCostAuthorize", (req) => {
         if (req.estimate.category === BudgetCategory.INFRASTRUCTURE) {
+          // Infrastructure is life-or-death — always approve.
           this.sendById(req.requestor, "eCostAuthorized", {
             requestId: req.requestId, approved: true, reason: "Infrastructure authorized (survival)",
           });
+        } else if (req.estimate.category === BudgetCategory.STORAGE) {
+          // Storage is survival-critical — without memory persistence,
+          // the agent loses continuity on restart. Approve like infrastructure.
+          this.sendById(req.requestor, "eCostAuthorized", {
+            requestId: req.requestId, approved: true, reason: "Storage authorized (survival — memory persistence)",
+          });
         } else if (req.estimate.category === BudgetCategory.INFERENCE) {
+          // Allow inference only if very cheap.
           const totalCostUsd = this.estimateCostUsd(req.estimate);
           if (totalCostUsd < 100000) {
             this.sendById(req.requestor, "eCostAuthorized", {
@@ -137,6 +145,7 @@ export class Treasury extends Machine {
             });
           }
         } else {
+          // Everything else denied.
           this.sendById(req.requestor, "eCostAuthorized", {
             requestId: req.requestId, approved: false, reason: "Denied in CRITICAL state",
           });

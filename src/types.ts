@@ -19,6 +19,9 @@ export type TokenSymbol = string;  // "ETH", "USDC", "AKT", "FIL", etc.
 export type Address = string;      // Hex-encoded wallet address (0x...)
 export type Signature = string;    // Hex-encoded cryptographic signature
 export type ChainId = string;      // "ethereum", "solana", "akash", etc.
+export type CID = string;          // Content identifier (IPFS/IPLD content-addressed hash)
+export type DPID = string;         // Decentralized Persistent Identifier (versioned, resolvable)
+export type MiddlewareName = string; // Human-readable middleware identifier
 
 // ============================================================================
 // ENUMS
@@ -67,9 +70,16 @@ export enum SigningType {
 export enum BudgetCategory {
   INFERENCE = "INFERENCE",             // LLM calls
   TOOLS = "TOOLS",                     // On-chain tool execution (gas)
-  INFRASTRUCTURE = "INFRASTRUCTURE",   // Compute, storage leases
+  INFRASTRUCTURE = "INFRASTRUCTURE",   // Compute leases
+  STORAGE = "STORAGE",                 // IPFS pinning, Filecoin deals, persistence costs
   MESSAGING = "MESSAGING",             // Channel-specific costs
-  RESERVE = "RESERVE",                 // Emergency funds
+  RESERVE = "RESERVE",                 // Emergency funds — untouched except in CRITICAL
+}
+
+/** Which stage of the inference pipeline a middleware event relates to. */
+export enum MiddlewareStage {
+  REQUEST = "REQUEST",     // Before LLM call (forward order)
+  RESPONSE = "RESPONSE",  // After LLM response (reverse order)
 }
 
 // ============================================================================
@@ -151,8 +161,9 @@ export interface BudgetAllocation {
   inference: number;       // Percentage (0-100)
   tools: number;
   infrastructure: number;
+  storage: number;         // IPFS pinning, Filecoin deals
   messaging: number;
-  reserve: number;         // Emergency reserve
+  reserve: number;         // Emergency reserve, untouched in FUNDED/LOW
 }
 
 /** Expense record for the ledger. */
@@ -190,4 +201,32 @@ export interface TreasuryReport {
   runwayDays: number;
   budget: BudgetAllocation;
   recentExpenses: Expense[];
+}
+
+// ============================================================================
+// MIDDLEWARE PIPELINE RECORDS
+// ============================================================================
+
+/**
+ * Shared mutable context flowing through the middleware chain.
+ * Mirrors lmstudio-bridge's ShimContext. The metadata map is the
+ * inter-middleware communication channel — one middleware writes a key,
+ * the next reads it (e.g., "compressedBuffer", "encryptedBuffer").
+ */
+export interface PipelineContext {
+  requestId: string;                    // Unique per inference call
+  sessionKey: SessionKey;               // Session this inference belongs to
+  timestamp: number;                    // When the pipeline was entered
+  metadata: Record<string, string>;     // Inter-middleware data channel
+}
+
+/**
+ * A specific version of the agent's dPID pointing to a CID.
+ * Used in dPID resolution and update events.
+ */
+export interface DPIDVersion {
+  dpid: DPID;
+  cid: CID;
+  version: number;
+  timestamp: number;
 }

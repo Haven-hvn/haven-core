@@ -9,14 +9,17 @@
 // TYPE ALIASES — Semantic wrappers for readability
 // ============================================================================
 
-type MessageId   = string;
-type SessionKey  = string;
-type ToolName    = string;
-type ChannelName = string;
-type TokenSymbol = string;  // "ETH", "USDC", "AKT", "FIL", etc.
-type Address     = string;  // Hex-encoded wallet address (0x...)
-type Signature   = string;  // Hex-encoded cryptographic signature
-type ChainId     = string;  // "ethereum", "solana", "akash", etc.
+type MessageId      = string;
+type SessionKey     = string;
+type ToolName       = string;
+type ChannelName    = string;
+type TokenSymbol    = string;  // "ETH", "USDC", "AKT", "FIL", etc.
+type Address        = string;  // Hex-encoded wallet address (0x...)
+type Signature      = string;  // Hex-encoded cryptographic signature
+type ChainId        = string;  // "ethereum", "solana", "akash", etc.
+type CID            = string;  // Content identifier (IPFS/IPLD content-addressed hash)
+type DPID           = string;  // Decentralized Persistent Identifier (versioned, resolvable)
+type MiddlewareName = string;  // Human-readable middleware identifier
 
 // ============================================================================
 // ENUMS
@@ -65,9 +68,16 @@ enum SigningType {
 enum BudgetCategory {
     INFERENCE,       // LLM calls
     TOOLS,           // On-chain tool execution (gas)
-    INFRASTRUCTURE,  // Compute, storage leases
+    INFRASTRUCTURE,  // Compute leases
+    STORAGE,         // IPFS pinning, Filecoin deals, persistence costs
     MESSAGING,       // Channel-specific costs (Solana memo fees, etc.)
     RESERVE          // Emergency funds — untouched except in CRITICAL
+}
+
+// Which stage of the inference pipeline a middleware event relates to.
+enum MiddlewareStage {
+    REQUEST,   // Before LLM call (forward order)
+    RESPONSE   // After LLM response (reverse order)
 }
 
 // ============================================================================
@@ -149,6 +159,7 @@ type BudgetAllocation = (
     inference: int,       // Percentage (0-100)
     tools: int,
     infrastructure: int,
+    storage: int,         // IPFS pinning, Filecoin deals
     messaging: int,
     reserve: int          // Emergency reserve, untouched in FUNDED/LOW
 );
@@ -188,4 +199,28 @@ type TreasuryReport = (
     runwayDays: int,
     budget: BudgetAllocation,
     recentExpenses: seq[Expense]
+);
+
+// ============================================================================
+// MIDDLEWARE PIPELINE RECORDS
+// ============================================================================
+
+// Shared mutable context flowing through the middleware chain.
+// Mirrors lmstudio-bridge's ShimContext. The metadata map is the
+// inter-middleware communication channel — one middleware writes a key,
+// the next reads it (e.g., "compressedBuffer", "encryptedBuffer").
+type PipelineContext = (
+    requestId: string,           // Unique per inference call
+    sessionKey: SessionKey,      // Session this inference belongs to
+    timestamp: int,              // When the pipeline was entered
+    metadata: map[string, string]  // Inter-middleware data channel
+);
+
+// A specific version of the agent's dPID pointing to a CID.
+// Used in dPID resolution and update events.
+type DPIDVersion = (
+    dpid: DPID,
+    cid: CID,
+    version: int,
+    timestamp: int
 );

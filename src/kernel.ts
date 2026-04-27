@@ -24,6 +24,7 @@ import type {
   ChannelName,
 } from "./types.js";
 import { generateSessionKey } from "./interfaces.js";
+import type { Machine } from "./machine.js";
 
 export interface KernelConfig {
   /** Key source for wallet unlock (default: "env:SOVEREIGN_AGENT_PRIVATE_KEY"). */
@@ -256,6 +257,19 @@ export class SovereignAgentKernel {
    */
   setTransformContext(fn: TransformContextFn): void {
     this.agent.setTransformContext(fn);
+  }
+
+  /**
+   * Wire an InferencePipeline between the AgentLoop and the provider.
+   * The pipeline is a transparent proxy — AgentLoop sends eLLMRequest
+   * and receives eLLMResponse identically, but middleware can intercept.
+   * 
+   * Call this after kernel construction but before start():
+   *   const pipeline = new InferencePipeline(kernel.registry, ...);
+   *   kernel.setPipeline(pipeline);
+   */
+  setPipeline(pipeline: Machine): void {
+    this.agent.setPipeline(pipeline);
   }
 
   /**

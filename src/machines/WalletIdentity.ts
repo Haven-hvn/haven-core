@@ -9,6 +9,10 @@
  * this machine boundary — other machines request signatures, they don't
  * access keys.
  * 
+ * The wallet also manages the agent's dPID — a Decentralized Persistent
+ * Identifier derived from the address. Together, address + dPID form the
+ * agent's complete identity: "I am 0xAgent..., my state lives at dpid:XYZ."
+ * 
  * States: Locked → Unlocked ↔ Signing
  */
 
@@ -18,14 +22,25 @@ import {
   type Signature,
   type SigningRequest,
   type SigningResult,
+  type CID,
+  type DPID,
+  type DPIDVersion,
   WalletState,
+  SigningType,
 } from "../types.js";
 import type { CryptoAdapter } from "../interfaces.js";
+import { deriveDPID } from "../interfaces.js";
 import { createHash } from "crypto";
 
 export class WalletIdentity extends Machine {
   /** The address derived from the private key (public, safe to share). */
   private address: Address = "";
+
+  /** The agent's dPID, derived from its address. */
+  private dpid: DPID = "";
+
+  /** Current root CID of the agent's memory (resolved on boot via dPID). */
+  private rootCid: CID = "";
 
   /** Whether a key is currently loaded. */
   private walletState: WalletState = WalletState.LOCKED;
@@ -63,6 +78,8 @@ export class WalletIdentity extends Machine {
       .onEntry(() => {
         this.walletState = WalletState.LOCKED;
         this.address = "";
+        this.dpid = "";
+        this.rootCid = "";
         this.pendingRequests = [];
         this.log("Locked — awaiting key");
       })
@@ -83,7 +100,16 @@ export class WalletIdentity extends Machine {
           this.privateKey = this.loadKey(keySource);
           this.address = this.deriveAddress(this.privateKey);
         }
-        this.log(`Unlocked — address ${this.address}`);
+
+        // Derive the agent's dPID from its address.
+        this.dpid = deriveDPID(this.address);
+        this.log(`Unlocked — address ${this.address}, dPID ${this.dpid}`);
+
+        // Request dPID resolution to find the current root CID.
+        // A dPID resolver extension will handle this and respond with eDPIDResolved.
+        // If no resolver is registered, the agent boots without memory (graceful).
+        this.sendSelf("eResolveDPID", this.dpid);
+
         this.goto("Unlocked");
       })
       .on("eSignRequest", (req: SigningRequest) => {
@@ -111,7 +137,9 @@ export class WalletIdentity extends Machine {
       .on("eLockWallet", () => {
         this.privateKey = "";
         this.address = "";
-        this.log("Locking — key cleared");
+        this.dpid = "";
+        this.rootCid = "";
+        this.log("Locking — key and dPID state cleared");
         this.goto("Locked");
       })
       .on("eSignRequest", (req: SigningRequest) => {
@@ -121,10 +149,52 @@ export class WalletIdentity extends Machine {
       .on("eGetAddress", () => {
         this.sendSelf("eAddressResult", this.address);
       })
+      // --- dPID lifecycle handlers ---
+      .on("eResolveDPID", (_dpid: string) => {
+        // No-op in core — a dPID resolver extension responds with eDPIDResolved.
+        // This event just passes through. If no resolver is registered, nothing happens.
+        this.log(`dPID resolution requested — ${_dpid}`);
+      })
+      .on("eDPIDResolved", (version: DPIDVersion) => {
+        // dPID resolver extension responded with the current root CID.
+        this.rootCid = version.cid;
+        this.log(`dPID resolved — CID ${version.cid} (v${version.version})`);
+
+        // Emit memory restore request so persistence extensions can load state.
+        // If rootCid is empty, this is a fresh agent with no prior memory.
+        if (this.rootCid !== "") {
+          this.sendSelf("eMemoryRestore", this.rootCid);
+        } else {
+          this.log("No prior memory — fresh agent");
+        }
+      })
+      .on("eUpdateDPID", (req: { newCid: CID; requestor: string }) => {
+        // An extension (e.g., PersistenceMiddleware) wants to update the
+        // agent's dPID to point to a new root CID. This requires a signature.
+        this.log(`dPID update requested — new CID ${req.newCid}`);
+
+        // Sign the dPID version update via existing Signing state.
+        const sigReq: SigningRequest = {
+          id: `dpid-update:${req.newCid}`,
+          signingType: SigningType.TYPED_DATA,
+          payload: `dpid:${this.dpid}:cid:${req.newCid}`,
+          chain: "ethereum",
+          requestor: req.requestor,
+        };
+        this.currentRequest = sigReq;
+        this.goto("Signing");
+      })
+      .on("eDPIDUpdated", (version: DPIDVersion) => {
+        // Confirmation that the dPID was updated on-chain (or in registry).
+        this.rootCid = version.cid;
+        this.log(`dPID updated — CID ${version.cid} (v${version.version})`);
+      })
       .on("eStop", () => {
         this.privateKey = "";
         this.address = "";
-        this.log("Shutdown — key cleared");
+        this.dpid = "";
+        this.rootCid = "";
+        this.log("Shutdown — key and dPID state cleared");
         this.halt();
       });
 

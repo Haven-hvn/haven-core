@@ -13,6 +13,7 @@ import {
   type SessionKey,
   type Address,
   type Signature,
+  type DPID,
   type BudgetAllocation,
   BudgetCategory,
   TreasuryState,
@@ -40,6 +41,61 @@ export interface CryptoAdapter {
   signMessage(keyMaterial: unknown, payload: string): Promise<Signature>;
   /** Sign a transaction payload with the loaded key material. */
   signTransaction(keyMaterial: unknown, payload: string): Promise<Signature>;
+}
+
+// ============================================================================
+// STORAGE ADAPTER — Layer 2 persistence interface
+// ============================================================================
+
+/**
+ * Pluggable storage adapter for the StorageBackend machine.
+ *
+ * Same pattern as CryptoAdapter: the kernel defines the interface but never
+ * imports any storage-specific library (Synapse SDK, Helia, etc.). The host
+ * injects a concrete adapter at boot time.
+ *
+ * SALM Layer 2 boundary: the storage key (if any) lives inside the adapter,
+ * not in the pipeline middleware that requests storage. PersistenceMiddleware
+ * at Layer 5/6 sends eStoreData events → StorageBackend at Layer 2 holds the
+ * adapter and the key material.
+ *
+ * Must be set after StorageBackend construction but before initialize().
+ */
+export interface StorageAdapter {
+  /**
+   * Store data on IPFS (or similar content-addressed storage).
+   * Handles serialization to DAG-CBOR internally if needed.
+   * Returns the real CID of the stored data.
+   */
+  store(data: Uint8Array): Promise<{ cid: string }>;
+
+  /**
+   * Retrieve data by CID.
+   * Returns raw bytes; caller is responsible for deserialization.
+   */
+  retrieve(cid: string): Promise<{ data: Uint8Array }>;
+
+  /**
+   * Check the pin status of a CID.
+   * Returns provider name, expiry, and redundancy count.
+   */
+  checkPin(cid: string): Promise<{
+    cid: string;
+    provider: string;
+    expiresAt: number;   // Unix ms, 0 = permanent
+    redundancy: number;  // Number of replicas
+  }>;
+
+  /**
+   * Renew (extend) the pin for a CID.
+   * Returns the updated pin status after renewal.
+   */
+  renewPin(cid: string): Promise<{
+    cid: string;
+    provider: string;
+    expiresAt: number;
+    redundancy: number;
+  }>;
 }
 
 /** Generate a deterministic session key from channel + chat identifiers. */
@@ -108,6 +164,9 @@ export function isBudgetAvailable(
     case BudgetCategory.INFRASTRUCTURE:
       limit = budget.infrastructure;
       break;
+    case BudgetCategory.STORAGE:
+      limit = budget.storage;
+      break;
     case BudgetCategory.MESSAGING:
       limit = budget.messaging;
       break;
@@ -121,13 +180,26 @@ export function isBudgetAvailable(
   return spentPercentage < limit;
 }
 
-/** Default budget allocation — balanced, with a 5% emergency reserve. */
+/** Default budget allocation — balanced, with storage and emergency reserves.
+ *  Percentages: inference=38, tools=14, infrastructure=28, storage=5,
+ *               messaging=10, reserve=5. Total = 100.
+ */
 export function defaultBudgetAllocation(): BudgetAllocation {
   return {
-    inference: 40,
-    tools: 15,
-    infrastructure: 30,
+    inference: 38,
+    tools: 14,
+    infrastructure: 28,
+    storage: 5,
     messaging: 10,
     reserve: 5,
   };
+}
+
+/**
+ * Deterministically derive the agent's dPID namespace from its Ethereum address.
+ * Pure function — actual registry lookup is an extension concern.
+ * In practice: hash(address) → dPID namespace, or follow dpid.org conventions.
+ */
+export function deriveDPID(address: Address): DPID {
+  return `dpid:${address}`;
 }

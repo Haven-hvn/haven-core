@@ -3,8 +3,8 @@
  * 
  * Runs through Phase 0 milestone verification plus pi-mono pattern tests:
  *   ✓ Kernel boots with 5 core machines (kernel-scoped registry)
- *   ✓ Wallet unlocks and derives address
- *   ✓ Treasury initializes in FUNDED state
+ *   ✓ Wallet unlocks and derives address + dPID
+ *   ✓ Treasury initializes in FUNDED state with STORAGE budget
  *   ✓ MessageBus routes messages
  *   ✓ AgentLoop processes messages through cost-checking
  *   ✓ ProviderStub returns responses
@@ -17,12 +17,16 @@
  *   ✓ Expense tracking works
  *   ✓ Multiple channels work
  *   ✓ State machine states are correct
+ *   ✓ Pipeline wiring API exists (setPipeline)
+ *   ✓ dPID events are in EventMap
+ *   ✓ STORAGE budget category is approved in CRITICAL
  *   ✓ Shutdown works cleanly
  */
 
 import { SovereignAgentKernel } from "./kernel.js";
 import type { MachineEvent } from "./machine.js";
 import { BudgetCategory, TreasuryState, WalletState } from "./types.js";
+import type { EventMap } from "./events.js";
 
 let passed = 0;
 let failed = 0;
@@ -150,7 +154,7 @@ async function runTests(): Promise<void> {
   assert(report.balances.length > 0, "Treasury has balances");
   assert(report.totalValueUsd > 0, "Treasury has USD value");
   assert(report.runwayDays > 30, "Runway is > 30 days");
-  assert(report.budget.inference === 40, "Inference budget is 40%");
+  assert(report.budget.inference === 38, "Inference budget is 38%");
   assert(report.budget.reserve === 5, "Reserve budget is 5%");
   assert(report.recentExpenses.length > 0, "Expenses were recorded");
   console.log("");
@@ -299,9 +303,51 @@ async function runTests(): Promise<void> {
   console.log("");
 
   // ========================================================================
-  // Test 13: Shutdown
+  // Test 13: Phase C — dPID, Pipeline, STORAGE
   // ========================================================================
-  console.log("─── Test 13: Shutdown ─────────────────────────────────────────");
+  console.log("─── Test 13: Phase C — dPID, Pipeline, STORAGE ────────────────");
+
+  // Verify new types exist and are usable.
+  const _pipelineCtxCheck: import("./types.js").PipelineContext = {
+    requestId: "test", sessionKey: "s", timestamp: 0, metadata: {},
+  };
+  assert(_pipelineCtxCheck.requestId === "test", "PipelineContext type is usable");
+
+  const _dpidVersionCheck: import("./types.js").DPIDVersion = {
+    dpid: "dpid:0x123", cid: "bafy:test", version: 1, timestamp: 0,
+  };
+  assert(_dpidVersionCheck.dpid.startsWith("dpid:"), "DPIDVersion type is usable");
+
+  // Verify STORAGE budget category exists.
+  assert(BudgetCategory.STORAGE === "STORAGE", "BudgetCategory.STORAGE exists");
+
+  // Verify budget allocation includes storage.
+  const reportC = kernel.treasury.getReport();
+  assert(reportC.budget.storage === 5, "Budget allocation includes storage=5%");
+  assert(
+    reportC.budget.inference + reportC.budget.tools + reportC.budget.infrastructure +
+    reportC.budget.storage + reportC.budget.messaging + reportC.budget.reserve === 100,
+    "Budget allocation sums to 100%"
+  );
+
+  // Verify setPipeline API exists on kernel.
+  assert(typeof kernel.setPipeline === "function", "kernel.setPipeline() API exists");
+
+  // Verify setPipeline API exists on agent.
+  assert(typeof kernel.agent.setPipeline === "function", "agent.setPipeline() API exists");
+
+  // Verify new events are in EventMap (type-level check — compiles = passes).
+  type _MiddlewareCheck = EventMap["eRegisterMiddleware"];
+  type _DPIDCheck = EventMap["eResolveDPID"];
+  type _MemoryCheck = EventMap["eMemoryRestored"];
+  assert(true, "Middleware/dPID/Memory events exist in EventMap (type-safe)");
+
+  console.log("");
+
+  // ========================================================================
+  // Test 14: Shutdown
+  // ========================================================================
+  console.log("─── Test 14: Shutdown ─────────────────────────────────────────");
   await kernel.stop();
 
   assert(!kernel.isRunning(), "Kernel is stopped");

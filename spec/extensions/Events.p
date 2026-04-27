@@ -90,3 +90,52 @@ event eDataStored: StorageRecord;
 event eRetrieveData: (key: StorageKey, provider: string);
 event eDataRetrieved: (key: StorageKey, data: string);
 event eStorageError: (key: StorageKey, error: string);
+
+// ============================================================================
+// PERSISTENCE MIDDLEWARE EVENTS
+// ============================================================================
+// Events emitted by PersistenceMiddleware during the conversation capture
+// and IPFS upload lifecycle. These are extension-level — core does not
+// depend on them. Other extensions (e.g., CIDRecorderMiddleware) consume them.
+
+// Persistence middleware formatted a conversation node from pipeline context.
+event eConversationCaptured: (sessionKey: SessionKey, node: ConversationNode);
+
+// Conversation node was uploaded to IPFS and assigned a CID.
+event eConversationStored: (sessionKey: SessionKey, cid: CID);
+
+// Session DAG was updated with a new conversation link.
+event eSessionDAGUpdated: SessionDAGNode;
+
+// ============================================================================
+// STORAGE PIN EVENTS
+// ============================================================================
+// Events for the StoragePinManager — monitors IPFS pin status and
+// autonomously renews pins before they expire, funded by Treasury.
+
+// Request pin status for a specific CID.
+event ePinCheck: CID;
+
+// Pin status response.
+event ePinStatus: PinStatus;
+
+// Request pin renewal (when expiring).
+event ePinRenew: (cid: CID, provider: string);
+
+// Pin renewed confirmation.
+event ePinRenewed: PinStatus;
+
+// Alert from HeartbeatService — a pin is expiring soon.
+event ePinExpiring: (cid: CID, daysLeft: int);
+
+// ============================================================================
+// ADAPTER DISCOVERY EVENTS
+// ============================================================================
+// Events for querying on-chain adapter registries via dPID.
+// Used by ToolExecutor or extension managers to discover capabilities.
+
+// Query the adapter registry for a specific capability.
+event eAdapterRegistryQuery: (capability: string);
+
+// Registry query result — the adapter's dPID, CID, and reputation score.
+event eAdapterRegistryResult: (capability: string, dpid: DPID, cid: CID, reputation: int);

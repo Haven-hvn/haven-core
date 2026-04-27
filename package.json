@@ -17,6 +17,7 @@
     "build": "tsc",
     "start:cli": "tsx src/index.ts",
     "test": "tsx src/test-harness.ts",
+    "test:integration": "tsx src/integration-test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {},
