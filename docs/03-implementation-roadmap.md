@@ -4,6 +4,9 @@
 
 This P language specification is a formal model. Turning it into a running sovereign agent means implementing these state machines in TypeScript, wiring them to real infrastructure, and progressively adding extensions. This roadmap is phased so that each phase produces a working (increasingly capable) agent.
 
+Related planning docs:
+- [`planning/10-ows-alignment-roadmap.md`](planning/10-ows-alignment-roadmap.md) — phased OWS alignment across storage, signing, policy, lifecycle, chain identifiers, and key isolation.
+
 ## Phase Overview
 
 ```
